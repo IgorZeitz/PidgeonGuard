@@ -1,0 +1,12 @@
+../Core/Src/main.c:92:5:main	24	static
+../Core/Src/main.c:194:6:SystemClock_Config	88	static
+../Core/Src/main.c:235:13:MX_TIM2_Init	40	static
+../Core/Src/main.c:283:13:MX_USART1_UART_Init	8	static
+../Core/Src/main.c:331:13:MX_GPIO_Init	48	static
+../Core/Src/main.c:400:6:HAL_TIM_IC_CaptureCallback	16	static
+../Core/Src/main.c:420:6:startDistanceMeasurement	8	static
+../Core/Src/main.c:426:6:calculateDistance	72	static
+../Core/Src/main.c:437:6:controlSMotor	24	static
+../Core/Src/main.c:505:6:calibrateDistance	80	static
+../Core/Src/main.c:537:6:lookForTarget	32	static
+../Core/Src/main.c:672:6:Error_Handler	4	static,ignoring_inline_asm
