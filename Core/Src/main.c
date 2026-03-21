@@ -171,6 +171,10 @@ int main(void)
 
 	  	//calibrateDistance();
 	  	lookForTarget();
+
+
+	  	HAL_PWREx_EnterSHUTDOWNMode();
+
 //	  	  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_6, GPIO_PIN_SET);
 //	  	  HAL_Delay(10);
 //	  	  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_6, GPIO_PIN_RESET);
@@ -546,7 +550,7 @@ void lookForTarget(){
 	uint8_t numberOfMeasurements = 60;
 	uint8_t measurementsTaken = 0;
 
-	while(1){ // TU JAKAŚ FLAGA, ŻE NIE ZAWSZE MA BYĆ ROBIONE
+	for(uint8_t i = 0; i<4; i++ ){ // Repeat full scanning 4 times
 
 		for(; measurementsTaken < numberOfMeasurements; ){
 			uint32_t message[16];
