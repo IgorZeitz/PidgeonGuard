@@ -128,6 +128,8 @@ int main(void)
 
   HAL_NVIC_EnableIRQ(TIM2_IRQn);
 
+  HAL_PWR_EnableWakeUpPin(PWR_WAKEUP_PIN1_LOW);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -172,6 +174,8 @@ int main(void)
 	  	//calibrateDistance();
 	  	lookForTarget();
 
+	  	__HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU);
+	  	__HAL_PWR_CLEAR_FLAG(PWR_FLAG_SB);
 
 	  	HAL_PWREx_EnterSHUTDOWNMode();
 
