@@ -18,8 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-//#include "app_fatfs.h"
-#include "ff.h"
+#include "app_fatfs.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -58,11 +57,17 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+RTC_HandleTypeDef hrtc;
+
 SPI_HandleTypeDef hspi1;
 
 TIM_HandleTypeDef htim2;
 
 UART_HandleTypeDef huart1;
+
+RTC_TimeTypeDef sTime;
+RTC_DateTypeDef sDate;
+
 
 /* USER CODE BEGIN PV */
 
@@ -75,10 +80,7 @@ static void MX_GPIO_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_SPI1_Init(void);
-
-static void SD_Card_Test(void);
-
-
+static void MX_RTC_Init(void);
 /* USER CODE BEGIN PFP */
 void calculateDistance();
 void controlSMotor(int32_t stepNumber, uint8_t direction);
@@ -86,6 +88,8 @@ void controlSMotor(int32_t stepNumber, uint8_t direction);
 void calibrateDistance();
 
 void lookForTarget();
+
+static void SD_Card_Test(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -103,6 +107,16 @@ uint32_t mappedSourrounding[60];
   * @brief  The application entry point.
   * @retval int
   */
+
+
+FATFS FatFs;
+FIL Fil;
+FRESULT FR_Status;
+FATFS *FS_Ptr;
+UINT RWC, WWC; // Read/Write Word Counter
+DWORD FreeClusters;
+uint32_t TotalSize, FreeSpace;
+char RW_Buffer[200];
 
 static void UART_Print(char* str)
 {
@@ -137,14 +151,10 @@ int main(void)
   MX_TIM2_Init();
   MX_USART1_UART_Init();
   MX_SPI1_Init();
-
-  MX_FATFS_Init();
-
-
-
-//  if (MX_FATFS_Init() != APP_OK) {
-//    Error_Handler();
-//  }
+  if (MX_FATFS_Init() != APP_OK) {
+    Error_Handler();
+  }
+  MX_RTC_Init();
   /* USER CODE BEGIN 2 */
 
   // Enable interrupts for input capture timers for both HC-SR04
@@ -160,11 +170,43 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
-  uint8_t message[16];
-  SD_Card_Test();
+  uint8_t message[64];
+  //SD_Card_Test();
   //HCSR04_Init(&htim3, GPIOC, GPIO_PIN_6);
 
+  sTime.Hours = 21;
+  sTime.Minutes = 28;
+  sTime.Seconds = 50;
+
+  HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BIN);
+
+  sDate.WeekDay = RTC_WEEKDAY_MONDAY;
+  sDate.Month = RTC_MONTH_APRIL;
+  sDate.Date = 8;
+  sDate.Year = 26;
+
+  HAL_RTC_SetDate(&hrtc, &sDate, RTC_FORMAT_BIN);
+
   //HCSR04_startMeasurement();
+
+  HAL_RTC_GetTime(&hrtc, &sTime, RTC_FORMAT_BIN);
+  HAL_RTC_GetDate(&hrtc, &sDate, RTC_FORMAT_BIN);
+
+  sprintf(RW_Buffer, "%02d-%02d-20%02d %02d:%02d:%02d\r\n",
+          sDate.Date,
+          sDate.Month,
+          sDate.Year,
+          sTime.Hours,
+          sTime.Minutes,
+          sTime.Seconds);
+
+  f_mount(&FatFs, "", 1);
+  f_open(&Fil, "TextFileWrite.txt", FA_WRITE | FA_READ | FA_CREATE_ALWAYS);
+  f_puts(RW_Buffer, &Fil);
+  f_close(&Fil);
+  //f_write(&Fil, RW_Buffer, strlen(RW_Buffer), &WWC);
+ f_mount(NULL, "", 0);
+
 	calibrateDistance();
   while (1)
   {
@@ -224,7 +266,6 @@ int main(void)
   /* USER CODE END 3 */
 }
 
-////
 
 static void SD_Card_Test(void)
 {
@@ -337,7 +378,6 @@ static void SD_Card_Test(void)
   }
 }
 
-/////
 
 /**
   * @brief System Clock Configuration
@@ -355,9 +395,10 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI|RCC_OSCILLATORTYPE_LSI;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+  RCC_OscInitStruct.LSIState = RCC_LSI_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
@@ -377,6 +418,43 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief RTC Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_RTC_Init(void)
+{
+
+  /* USER CODE BEGIN RTC_Init 0 */
+
+  /* USER CODE END RTC_Init 0 */
+
+  /* USER CODE BEGIN RTC_Init 1 */
+
+  /* USER CODE END RTC_Init 1 */
+
+  /** Initialize RTC Only
+  */
+  hrtc.Instance = RTC;
+  hrtc.Init.HourFormat = RTC_HOURFORMAT_24;
+  hrtc.Init.AsynchPrediv = 127;
+  hrtc.Init.SynchPrediv = 255;
+  hrtc.Init.OutPut = RTC_OUTPUT_DISABLE;
+  hrtc.Init.OutPutRemap = RTC_OUTPUT_REMAP_NONE;
+  hrtc.Init.OutPutPolarity = RTC_OUTPUT_POLARITY_HIGH;
+  hrtc.Init.OutPutType = RTC_OUTPUT_TYPE_OPENDRAIN;
+  hrtc.Init.OutPutPullUp = RTC_OUTPUT_PULLUP_NONE;
+  if (HAL_RTC_Init(&hrtc) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN RTC_Init 2 */
+
+  /* USER CODE END RTC_Init 2 */
+
 }
 
 /**
@@ -402,7 +480,7 @@ static void MX_SPI1_Init(void)
   hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
