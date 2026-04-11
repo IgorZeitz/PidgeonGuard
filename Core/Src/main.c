@@ -173,10 +173,10 @@ int main(void)
   uint8_t message[64];
   //SD_Card_Test();
   //HCSR04_Init(&htim3, GPIOC, GPIO_PIN_6);
-
+if(HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR1) != 0xBEEF){
   sTime.Hours = 21;
-  sTime.Minutes = 28;
-  sTime.Seconds = 50;
+  sTime.Minutes = 37;
+  sTime.Seconds = 0;
 
   HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BIN);
 
@@ -186,6 +186,9 @@ int main(void)
   sDate.Year = 26;
 
   HAL_RTC_SetDate(&hrtc, &sDate, RTC_FORMAT_BIN);
+
+  HAL_RTCEx_BKUPWrite(&hrtc, RTC_BKP_DR1, 0xBEEF);
+}
 
   //HCSR04_startMeasurement();
 
@@ -201,7 +204,8 @@ int main(void)
           sTime.Seconds);
 
   f_mount(&FatFs, "", 1);
-  f_open(&Fil, "TextFileWrite.txt", FA_WRITE | FA_READ | FA_CREATE_ALWAYS);
+  f_open(&Fil, "TextFileWrite.txt", FA_WRITE | FA_READ);
+  f_lseek(&Fil, f_size(&Fil));
   f_puts(RW_Buffer, &Fil);
   f_close(&Fil);
   //f_write(&Fil, RW_Buffer, strlen(RW_Buffer), &WWC);
