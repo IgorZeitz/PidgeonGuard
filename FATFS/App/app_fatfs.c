@@ -47,9 +47,9 @@ typedef enum {
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-FATFS USERFatFs;    /* File system object for USER logical drive */
-FIL USERFile;       /* File  object for USER */
-char USERPath[4];   /* USER logical drive path */
+FATFS USERFatFs;  /* File system object for USER logical drive */
+FIL USERFile;     /* File  object for USER */
+char USERPath[4]; /* USER logical drive path */
 /* USER CODE BEGIN PV */
 FS_FileOperationsTypeDef Appli_state = APPLICATION_IDLE;
 /* USER CODE END PV */
@@ -67,15 +67,14 @@ FS_FileOperationsTypeDef Appli_state = APPLICATION_IDLE;
 int32_t MX_FATFS_Init(void)
 {
   /*## FatFS: Link the disk I/O driver(s)  ###########################*/
-
-if (FATFS_LinkDriver(&USER_Driver, USERPath) != 0)
+  if (FATFS_LinkDriver(&USER_Driver, USERPath) != 0)
   /* USER CODE BEGIN FATFS_Init */
   {
     return APP_ERROR;
   }
   else
   {
-    Appli_state = APPLICATION_INIT;
+    Appli_state = APPLICATION_INIT; // also defined in usb_host.c
     return APP_OK;
   }
   /* USER CODE END FATFS_Init */

@@ -11,10 +11,9 @@ RM := rm -rf
 -include sources.mk
 -include Middlewares/Third_Party/FatFs/src/option/subdir.mk
 -include Middlewares/Third_Party/FatFs/src/subdir.mk
--include MIDWARE/FATFS_SD/subdir.mk
 -include FATFS/Target/subdir.mk
 -include FATFS/App/subdir.mk
--include Drivers/STM32G4xx_HAL_Driver/Src/subdir.mk
+-include Drivers/STM32G0xx_HAL_Driver/Src/subdir.mk
 -include Core/Startup/subdir.mk
 -include Core/Src/subdir.mk
 -include objects.mk
@@ -39,34 +38,34 @@ $(wildcard ../makefile.init) \
 $(wildcard ../makefile.targets) \
 
 
-BUILD_ARTIFACT_NAME := PidgeonGuard
+BUILD_ARTIFACT_NAME := PidgeonGuardPCB2
 BUILD_ARTIFACT_EXTENSION := elf
 BUILD_ARTIFACT_PREFIX :=
 BUILD_ARTIFACT := $(BUILD_ARTIFACT_PREFIX)$(BUILD_ARTIFACT_NAME)$(if $(BUILD_ARTIFACT_EXTENSION),.$(BUILD_ARTIFACT_EXTENSION),)
 
 # Add inputs and outputs from these tool invocations to the build variables 
 EXECUTABLES += \
-PidgeonGuard.elf \
+PidgeonGuardPCB2.elf \
 
 MAP_FILES += \
-PidgeonGuard.map \
+PidgeonGuardPCB2.map \
 
 SIZE_OUTPUT += \
 default.size.stdout \
 
 OBJDUMP_LIST += \
-PidgeonGuard.list \
+PidgeonGuardPCB2.list \
 
 
 # All Target
 all: main-build
 
 # Main-build Target
-main-build: PidgeonGuard.elf secondary-outputs
+main-build: PidgeonGuardPCB2.elf secondary-outputs
 
 # Tool invocations
-PidgeonGuard.elf PidgeonGuard.map: $(OBJS) $(USER_OBJS) C:\Users\48794\STM32CubeIDE\workspace_PidgeonGuard\PidgeonGuard\STM32G491RETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "PidgeonGuard.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\48794\STM32CubeIDE\workspace_PidgeonGuard\PidgeonGuard\STM32G491RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="PidgeonGuard.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+PidgeonGuardPCB2.elf PidgeonGuardPCB2.map: $(OBJS) $(USER_OBJS) C:\Users\48794\STM32CubeIDE\workspace_PidgeonGuard\PidgeonGuardPCB2\STM32G030F6PX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "PidgeonGuardPCB2.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m0plus -T"C:\Users\48794\STM32CubeIDE\workspace_PidgeonGuard\PidgeonGuardPCB2\STM32G030F6PX_FLASH.ld" --specs=nosys.specs -Wl,-Map="PidgeonGuardPCB2.map" -Wl,--gc-sections -static --specs=nano.specs -mfloat-abi=soft -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 
@@ -75,14 +74,14 @@ default.size.stdout: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
 	@echo 'Finished building: $@'
 	@echo ' '
 
-PidgeonGuard.list: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-objdump -h -S $(EXECUTABLES) > "PidgeonGuard.list"
+PidgeonGuardPCB2.list: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-objdump -h -S $(EXECUTABLES) > "PidgeonGuardPCB2.list"
 	@echo 'Finished building: $@'
 	@echo ' '
 
 # Other Targets
 clean:
-	-$(RM) PidgeonGuard.elf PidgeonGuard.list PidgeonGuard.map default.size.stdout
+	-$(RM) PidgeonGuardPCB2.elf PidgeonGuardPCB2.list PidgeonGuardPCB2.map default.size.stdout
 	-@echo ' '
 
 secondary-outputs: $(SIZE_OUTPUT) $(OBJDUMP_LIST)
