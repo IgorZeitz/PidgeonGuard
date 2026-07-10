@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "app_fatfs.h"
+#include "stdio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -32,7 +33,10 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define TIM3_MAX_VALUE  0x0000FFFFu
+#define DEBUG_FLAG
+
+#define TIM3_MAX_VALUE  0x0000FFFFU
+#define LOGS_BUFFER_MAX_VALUE 26U
 
 #define SMOTOR124_PORT GPIOA
 #define SMOTOR3_PORT GPIOB
@@ -69,8 +73,6 @@ UART_HandleTypeDef huart2;
 RTC_TimeTypeDef sTime;
 RTC_DateTypeDef sDate;
 
-
-char TxBuffer[250];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -80,29 +82,21 @@ static void MX_SPI1_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_RTC_Init(void);
 static void MX_TIM3_Init(void);
+
+static void peripheralsOn(void);
+static void peripheralsOff(void);
+static void sprayWater(void);
+
+static void logToSD(char logBuffer[]);
+
+static void controlSMotor(int32_t stepNumber, uint8_t direction);
+static void startDistanceMeasurement(void);
+static void scanRight(void);	// ???
+static void scanLeft(void);	// ???
+static void calibrateDistance(void);
+static void lookForTarget(void);
+static void calculateDistance(void);
 /* USER CODE BEGIN PFP */
-
-//void Flash_Unlock(void) {
-//    // Unlock Flash memory
-//    FLASH->KEYR = 0x45670123;
-//    FLASH->KEYR = 0xCDEF89AB;
-//    // Unlock Option Bytes
-//    FLASH->OPTKEYR = 0x08192A3B;
-//    FLASH->OPTKEYR = 0x4C5D6E7F;
-//}
-
-//void Boot0_Enable(void) {
-//    // Clear the nBOOT_SEL bit to enable BOOT0 pin functionality
-//    FLASH->OPTR &= ~FLASH_OPTR_nBOOT_SEL;
-//    // Wait for any ongoing flash operation to complete
-//    while(FLASH->SR & FLASH_SR_BSY1);
-//    // Start the Option Byte programming
-//    FLASH->CR |= FLASH_CR_OPTSTRT;
-//    // Wait for the programming to complete
-//    while(FLASH->SR & FLASH_SR_BSY1);
-//    // Launch the option byte loading
-//    FLASH->CR |= FLASH_CR_OBL_LAUNCH;
-//}
 
 /* USER CODE END PFP */
 
@@ -124,11 +118,6 @@ DWORD FreeClusters;
 uint32_t TotalSize, FreeSpace;
 char RW_Buffer[200];
 
-static void UART_Print(char* str)
-{
-    HAL_UART_Transmit(&huart2 , (uint8_t *) str, strlen(str), 100);
-}
-
 /* USER CODE END 0 */
 
 /**
@@ -138,57 +127,46 @@ static void UART_Print(char* str)
 int main(void)
 {
 
-  /* USER CODE BEGIN 1 */
-	//BOOT PIN
-	// Check if the nBOOT_SEL bit is already cleared
-	//HAL_Delay(8000);	// wait for 8s before changing configuration
+	for(volatile uint32_t i = 0; i < 160000000; i++); // Pseudo delay  before sys clk init to connect via SWD
 
-	  //  if ((FLASH->OPTR & FLASH_OPTR_nBOOT_SEL) == 0)
-	  //  {
-	        // If already cleared, do nothing
-	//        for (;;);
-	 //   // Unlock flash memory and option bytes
-	 //   Flash_Unlock();
-	    // Enable BOOT0 pin functionality
-	//    Boot0_Enable();
-	    // We should never reach this point as the system will reset
+  /* USER CODE BEGIN 1 */
+
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-  HAL_Init();
+	HAL_Init();
 
   /* USER CODE BEGIN Init */
 
   /* USER CODE END Init */
 
   /* Configure the system clock */
-  SystemClock_Config();
+	SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
 
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
-  MX_GPIO_Init();
-  MX_SPI1_Init();
-  MX_USART2_UART_Init();
-  if (MX_FATFS_Init() != APP_OK) {
-    Error_Handler();
-  }
-  MX_RTC_Init();
-  MX_TIM3_Init();
+	MX_GPIO_Init();
+	MX_SPI1_Init();
+	MX_USART2_UART_Init();
+	if (MX_FATFS_Init() != APP_OK) {
+	Error_Handler();
+	}
+	MX_RTC_Init();
+	MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
 
   // Enable interrupts for input capture timers for both HC-SR04
-    HAL_TIM_IC_Start_IT(&htim3, TIM_CHANNEL_3);
+    HAL_TIM_IC_Start_IT(&htim3, TIM_CHANNEL_3);	// TODO: ten tim3?
     //HCSR04_Init(&htim3, GPIOC, GPIO_PIN_6);
 
     HAL_NVIC_EnableIRQ(TIM3_IRQn);
 
-    HAL_PWR_EnableWakeUpPin(PWR_WAKEUP_PIN1_LOW);
-
+    HAL_PWR_EnableWakeUpPin(PWR_WAKEUP_PIN1_LOW);	// TODO: ten pin?
 
   /* USER CODE END 2 */
 
@@ -214,76 +192,368 @@ int main(void)
     HAL_RTCEx_BKUPWrite(&hrtc, RTC_BKP_DR1, 0xBEEF);
   }
 
+  peripheralsOn();
+  HAL_Delay(10);	// wait for power to stabilize
 
-  HAL_RTC_GetTime(&hrtc, &sTime, RTC_FORMAT_BIN);
-   HAL_RTC_GetDate(&hrtc, &sDate, RTC_FORMAT_BIN);
-
-   sprintf(RW_Buffer, "WKUP: %02d-%02d-20%02d %02d:%02d:%02d\r\n",
-           sDate.Date,
-           sDate.Month,
-           sDate.Year,
-           sTime.Hours,
-           sTime.Minutes,
-           sTime.Seconds);
-
-   FR_Status = f_mount(&FatFs, "", 1);
-       if (FR_Status != FR_OK)
-       {
-         sprintf(TxBuffer, "\r\nError! While Mounting SD Card, Error Code: (%i)\r\n", FR_Status);
-         UART_Print(TxBuffer);
-       }
-
-   //f_mount(&FatFs, "", 1);
-       FR_Status = f_open(&Fil, "TextFileWrite.txt", FA_WRITE | FA_READ);
-   if (FR_Status != FR_OK)
-   {
-     sprintf(TxBuffer, "\r\nError! While Opening File: (%i)\r\n", FR_Status);
-     UART_Print(TxBuffer);
-   }
-
-   f_lseek(&Fil, f_size(&Fil));
-   f_puts(RW_Buffer, &Fil);
-   f_close(&Fil);
-   //f_write(&Fil, RW_Buffer, strlen(RW_Buffer), &WWC);
-  f_mount(NULL, "", 0);
-
- 	calibrateDistance();
+  logToSD("WKUP:");
+  calibrateDistance();	// TODO: Calibration should be done only once
 
   while (1)
   {
-	  // PWR TEST
-	  	HAL_Delay(5000);
+	  /*
+	   * 	---- 1
+	   * 	1) Power on
+	   * 	2) Set STM RTC Time
+	   * 	3) Powet on periferies
+	   * 	4) Calibrate
+	   * 	5) Save logs
+	   * 	6) Check for target + shoot + loogs
+	   * 	7) No target = power of periferies + STOP mode
+	   * 	---- 2
+	   * 	8) Power on Periferies
+	   * 	9) Look for target
+	   * 	10) Power of + STOP mode
+	   *
+	   */
 
-	  	HAL_GPIO_WritePin(PWR_INIT_PORT, PWR_INIT_PIN, GPIO_PIN_SET);
-	  	sprintf((char*)message, "HIGH\n");
-	  			HAL_UART_Transmit(&huart2, message, strlen((char*)message), 1000);
-
-	  	HAL_Delay(10000);
-
-	  	HAL_GPIO_WritePin(PWR_INIT_PORT, PWR_INIT_PIN, GPIO_PIN_RESET);
-	  	sprintf((char*)message, "LOW\n");
-	  			HAL_UART_Transmit(&huart2, message, strlen((char*)message), 1000);
-
-	  			HAL_Delay(10000);
-	  	//PWR END TEST
-
-	  	//sprintf((char*)message, "MAP: %lu\n", mappedSourrounding[10]);
-	  	//HAL_UART_Transmit(&huart1, message, strlen((char*)message), 1000);
-
-	  	//calibrateDistance();
 	  	lookForTarget();
 
 	  	__HAL_PWR_CLEAR_FLAG(PWR_FLAG_WUF1);
 	  	__HAL_PWR_CLEAR_FLAG(PWR_FLAG_SB);
 
-		sprintf((char*)message, "Spij\n");
-		HAL_UART_Transmit(&huart2, message, strlen((char*)message), 1000);
+		logToSD("STOPMODE:");
+
+		peripheralsOff();
+		HAL_Delay(10);
 	  	HAL_PWR_EnterSTANDBYMode();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
+}
+
+void peripheralsOn(void){
+	HAL_GPIO_WritePin(PWR_INIT_PORT, PWR_INIT_PIN, GPIO_PIN_SET);
+	#ifndef DEBUG_FLAG
+		sprintf((char*)message, "HIGH\n");
+		HAL_UART_Transmit(&huart2, message, strlen((char*)message), 1000);
+	#endif
+}
+
+void peripheralsOff(void){
+	HAL_GPIO_WritePin(PWR_INIT_PORT, PWR_INIT_PIN, GPIO_PIN_RESET);
+	#ifndef DEBUG_FLAG
+		sprintf((char*)message, "LOW\n");
+		HAL_UART_Transmit(&huart2, message, strlen((char*)message), 1000);
+	#endif
+}
+
+void sprayWater(void){
+	HAL_GPIO_TogglePin(PUMP_PORT, PUMP_PIN);
+	HAL_Delay(50);
+	HAL_GPIO_TogglePin(PUMP_PORT, PUMP_PIN);
+}
+
+void startDistanceMeasurement(){
+	  HAL_GPIO_WritePin(HC_TRIG_PORT, HC_TRIG_PIN, GPIO_PIN_SET);
+	  HAL_Delay(10);
+	  HAL_GPIO_WritePin(HC_TRIG_PORT, HC_TRIG_PIN, GPIO_PIN_RESET);
+}
+
+void calculateDistance(){
+
+	if(l_hcrs04Ticks2 > l_hcrs04Ticks1){
+		distance_L = l_hcrs04Ticks2 - l_hcrs04Ticks1;
+	} else {
+		distance_L = TIM3_MAX_VALUE - (l_hcrs04Ticks1 - l_hcrs04Ticks2);
+	}
+
+	#ifndef DEBUG_FLAG
+		sprintf((char*)message, "DIST: %lu\n", distance_L);
+		HAL_UART_Transmit(&huart2, message, strlen((char*)message), 1000);
+	#endif
+}
+
+
+void controlSMotor(int32_t stepNumber, uint8_t direction){
+	int32_t stepsPerformed = 0;
+	if(direction == 0){
+		while(stepNumber > stepsPerformed){	//	Turn Right
+		switch (stepsPerformed % 4) {
+		      case 0:  // 1010
+		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI1_PIN, GPIO_PIN_SET);
+		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI2_PIN, GPIO_PIN_RESET);
+		        HAL_GPIO_WritePin(SMOTOR3_PORT, SMOTOR_INI3_PIN, GPIO_PIN_SET);
+		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI4_PIN, GPIO_PIN_RESET);
+		      break;
+		      case 1:  // 0110
+		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI1_PIN, GPIO_PIN_RESET);
+		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI2_PIN, GPIO_PIN_SET);
+		        HAL_GPIO_WritePin(SMOTOR3_PORT, SMOTOR_INI3_PIN, GPIO_PIN_SET);
+		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI4_PIN, GPIO_PIN_RESET);
+		      break;
+		      case 2:  //0101
+		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI1_PIN, GPIO_PIN_RESET);
+		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI2_PIN, GPIO_PIN_SET);
+		        HAL_GPIO_WritePin(SMOTOR3_PORT, SMOTOR_INI3_PIN, GPIO_PIN_RESET);
+		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI4_PIN, GPIO_PIN_SET);
+		      break;
+		      case 3:  //1001
+		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI1_PIN, GPIO_PIN_SET);
+		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI2_PIN, GPIO_PIN_RESET);
+		        HAL_GPIO_WritePin(SMOTOR3_PORT, SMOTOR_INI3_PIN, GPIO_PIN_RESET);
+		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI4_PIN, GPIO_PIN_SET);
+		      break;
+		    }
+		stepsPerformed++;
+		HAL_Delay(5);
+		}
+	} else{
+		while(stepNumber > stepsPerformed){	//	Turn Left
+			switch ( stepNumber % 4) {
+		      case 0:  // 1010
+		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI1_PIN, GPIO_PIN_SET);
+		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI2_PIN, GPIO_PIN_RESET);
+		        HAL_GPIO_WritePin(SMOTOR3_PORT, SMOTOR_INI3_PIN, GPIO_PIN_SET);
+		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI4_PIN, GPIO_PIN_RESET);
+		      break;
+		      case 1:  // 0110
+		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI1_PIN, GPIO_PIN_RESET);
+		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI2_PIN, GPIO_PIN_SET);
+		        HAL_GPIO_WritePin(SMOTOR3_PORT, SMOTOR_INI3_PIN, GPIO_PIN_SET);
+		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI4_PIN, GPIO_PIN_RESET);
+		      break;
+		      case 2:  //0101
+		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI1_PIN, GPIO_PIN_RESET);
+		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI2_PIN, GPIO_PIN_SET);
+		        HAL_GPIO_WritePin(SMOTOR3_PORT, SMOTOR_INI3_PIN, GPIO_PIN_RESET);
+		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI4_PIN, GPIO_PIN_SET);
+		      break;
+		      case 3:  //1001
+		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI1_PIN, GPIO_PIN_SET);
+		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI2_PIN, GPIO_PIN_RESET);
+		        HAL_GPIO_WritePin(SMOTOR3_PORT, SMOTOR_INI3_PIN, GPIO_PIN_RESET);
+		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI4_PIN, GPIO_PIN_SET);
+		      break;
+			    }
+			stepNumber--;
+		HAL_Delay(5);
+		}
+	}
+}
+
+void calibrateDistance(){
+
+	uint8_t oneStep = 12;
+	uint8_t numberOfMeasurements = 60;
+
+	startDistanceMeasurement();
+	HAL_Delay(5);		// delay and second measurement to make sure that first measured value isn't trash
+	startDistanceMeasurement();
+	calculateDistance();
+	mappedSourrounding[0] = distance_L;
+
+	for(uint8_t i = 0; i < numberOfMeasurements; ){
+
+		controlSMotor(oneStep, 0);
+
+		startDistanceMeasurement();
+		calculateDistance();
+		i++;
+
+		mappedSourrounding[i] = distance_L;
+	}
+
+	controlSMotor(720, 1); // Return to the max left side of sensor sight
+
+
+	#ifndef DEBUG_FLAG
+		sprintf((char*)message, "Calibration Completed.\n");
+		HAL_UART_Transmit(&huart2, message, strlen((char*)message), 1000);
+	#endif
+}
+
+void scanRight(){
+
+}
+
+void scanLeft(){
+
+}
+
+void lookForTarget(){
+	uint8_t oneStep = 12;
+	uint8_t numberOfMeasurements = 60;
+	uint8_t measurementsTaken = 0;
+
+	uint8_t logger = 0;
+
+	for(uint8_t i = 0; i<4; i++ ){ // Repeat full scanning 4 times	// TODO: zamienić 4 na #define
+
+		for(; measurementsTaken < numberOfMeasurements; ){
+
+				startDistanceMeasurement();
+				calculateDistance();
+
+				uint32_t supposedValue = mappedSourrounding[measurementsTaken];
+
+				controlSMotor(oneStep, 0);
+				measurementsTaken++;
+
+				logger = 0;
+
+				while(distance_L + 1000 < supposedValue){	// TODO: zamienić 1000 na #define
+
+					if(logger == 0){	// Save to logs that shooting happened
+						logToSD("SHOOT:");
+						logger = 1;
+					}
+
+					sprayWater();
+
+					uint32_t lastDistance = distance_L;
+
+					startDistanceMeasurement();
+					calculateDistance();
+
+					if(lastDistance - 70 > distance_L){
+
+						lastDistance = distance_L;
+
+						controlSMotor(oneStep, 0);
+						sprayWater();
+						startDistanceMeasurement();
+						calculateDistance();
+
+						measurementsTaken++;
+
+					} else if(lastDistance + 70 < distance_L){	// TODO: zamienić 70 na #define
+
+						lastDistance = distance_L;
+
+						controlSMotor(oneStep, 1);
+						sprayWater();
+
+						startDistanceMeasurement();
+						calculateDistance();
+
+						measurementsTaken--;
+					} else{
+						// ERROR???
+						// TODO: not an error just a target didn't move so repeat shooting - > return to the beginning of a while loop
+					}
+				}
+
+
+
+			}
+
+		if(measurementsTaken == 60){ // If sensor reached max right side turn direction // TODO: zamienić 60 na #define
+
+			for(; measurementsTaken > 0; ){
+
+				startDistanceMeasurement();
+				calculateDistance();
+
+				uint32_t supposedValue = mappedSourrounding[measurementsTaken];
+
+				controlSMotor(oneStep, 1);
+				measurementsTaken--;
+
+				logger = 0;
+
+				while(distance_L + 1000 < supposedValue){
+
+					if(logger == 0){	// Save to logs that shooting happened
+						logToSD("SHOOT:");
+						logger = 1;
+					}
+
+					sprayWater();
+
+					uint32_t lastDistance = distance_L;
+
+					startDistanceMeasurement();
+					calculateDistance();
+
+
+					if(lastDistance - 70 > distance_L){
+
+						lastDistance = distance_L;
+
+						controlSMotor(oneStep, 1);
+						sprayWater();
+
+						startDistanceMeasurement();
+						calculateDistance();
+
+						measurementsTaken--;
+
+					} else if(lastDistance < distance_L - 70){
+
+						lastDistance = distance_L;
+
+						controlSMotor(oneStep, 0);
+						sprayWater();
+
+
+						startDistanceMeasurement();
+						calculateDistance();
+
+						measurementsTaken++;
+					} else{
+						// ERROR???
+					}
+				}
+
+			}
+		}
+
+		if(measurementsTaken > 60){
+			measurementsTaken = 0;	// If some error appears and the function is stuck, zero the counter
+		}
+
+	}
+}
+
+void logToSD(char logBuffer[]){
+
+	HAL_RTC_GetTime(&hrtc, &sTime, RTC_FORMAT_BIN);
+	HAL_RTC_GetDate(&hrtc, &sDate, RTC_FORMAT_BIN);
+
+	sprintf(RW_Buffer, "%s %02d-%02d-20%02d %02d:%02d:%02d\r\n", logBuffer,
+	sDate.Date,
+	sDate.Month,
+	sDate.Year,
+	sTime.Hours,
+	sTime.Minutes,
+	sTime.Seconds);
+
+	FR_Status = f_mount(&FatFs, "", 1);
+
+	#ifndef DEBUG_FLAG
+	if (FR_Status != FR_OK)
+	{
+		sprintf((char*)message, "\r\nError! While Mounting SD Card, Error Code: (%i)\r\n", FR_Status);
+		HAL_UART_Transmit(&huart2, message, strlen((char*)message), 1000);
+	}
+	#endif
+
+	FR_Status = f_open(&Fil, "TextFileWrite.txt", FA_WRITE | FA_READ);
+
+	#ifndef DEBUG_FLAG
+	if (FR_Status != FR_OK)
+	{
+		sprintf((char*)message, "\r\nError! While Opening File: (%i)\r\n", FR_Status);
+		HAL_UART_Transmit(&huart2, message, strlen((char*)message), 1000);
+	}
+	#endif
+
+	f_lseek(&Fil, f_size(&Fil));
+	f_puts(RW_Buffer, &Fil);
+	f_close(&Fil);
+	f_mount(NULL, "", 0);
 }
 
 /**
@@ -562,356 +832,6 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim){
 		}
 }
 
-void startDistanceMeasurement(){
-	  HAL_GPIO_WritePin(HC_TRIG_PORT, HC_TRIG_PIN, GPIO_PIN_SET);
-	  HAL_Delay(10);
-	  HAL_GPIO_WritePin(HC_TRIG_PORT, HC_TRIG_PIN, GPIO_PIN_RESET);
-}
-
-void calculateDistance(){
-	if(l_hcrs04Ticks2 > l_hcrs04Ticks1){
-		distance_L = l_hcrs04Ticks2 - l_hcrs04Ticks1;
-	} else distance_L = TIM3_MAX_VALUE - (l_hcrs04Ticks1 - l_hcrs04Ticks2);
-
-	uint32_t message[16];
-  	//sprintf((char*)message, "DIST: %lu\n", distance_L);
-  	//HAL_UART_Transmit(&huart1, message, strlen((char*)message), 1000);
-}
-
-
-void controlSMotor(int32_t stepNumber, uint8_t direction){
-	int32_t stepsPerformed = 0;
-	if(direction == 0){
-		while(stepNumber > stepsPerformed){	//	Turn Right
-		switch (stepsPerformed % 4) {
-		      case 0:  // 1010
-		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI1_PIN, GPIO_PIN_SET);
-		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI2_PIN, GPIO_PIN_RESET);
-		        HAL_GPIO_WritePin(SMOTOR3_PORT, SMOTOR_INI3_PIN, GPIO_PIN_SET);
-		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI4_PIN, GPIO_PIN_RESET);
-		      break;
-		      case 1:  // 0110
-		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI1_PIN, GPIO_PIN_RESET);
-		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI2_PIN, GPIO_PIN_SET);
-		        HAL_GPIO_WritePin(SMOTOR3_PORT, SMOTOR_INI3_PIN, GPIO_PIN_SET);
-		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI4_PIN, GPIO_PIN_RESET);
-		      break;
-		      case 2:  //0101
-		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI1_PIN, GPIO_PIN_RESET);
-		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI2_PIN, GPIO_PIN_SET);
-		        HAL_GPIO_WritePin(SMOTOR3_PORT, SMOTOR_INI3_PIN, GPIO_PIN_RESET);
-		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI4_PIN, GPIO_PIN_SET);
-		      break;
-		      case 3:  //1001
-		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI1_PIN, GPIO_PIN_SET);
-		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI2_PIN, GPIO_PIN_RESET);
-		        HAL_GPIO_WritePin(SMOTOR3_PORT, SMOTOR_INI3_PIN, GPIO_PIN_RESET);
-		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI4_PIN, GPIO_PIN_SET);
-		      break;
-		    }
-		stepsPerformed++;
-		HAL_Delay(5);
-		}
-	} else{
-		while(stepNumber > stepsPerformed){	//	Turn Left
-			switch ( stepNumber % 4) {
-		      case 0:  // 1010
-		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI1_PIN, GPIO_PIN_SET);
-		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI2_PIN, GPIO_PIN_RESET);
-		        HAL_GPIO_WritePin(SMOTOR3_PORT, SMOTOR_INI3_PIN, GPIO_PIN_SET);
-		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI4_PIN, GPIO_PIN_RESET);
-		      break;
-		      case 1:  // 0110
-		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI1_PIN, GPIO_PIN_RESET);
-		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI2_PIN, GPIO_PIN_SET);
-		        HAL_GPIO_WritePin(SMOTOR3_PORT, SMOTOR_INI3_PIN, GPIO_PIN_SET);
-		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI4_PIN, GPIO_PIN_RESET);
-		      break;
-		      case 2:  //0101
-		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI1_PIN, GPIO_PIN_RESET);
-		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI2_PIN, GPIO_PIN_SET);
-		        HAL_GPIO_WritePin(SMOTOR3_PORT, SMOTOR_INI3_PIN, GPIO_PIN_RESET);
-		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI4_PIN, GPIO_PIN_SET);
-		      break;
-		      case 3:  //1001
-		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI1_PIN, GPIO_PIN_SET);
-		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI2_PIN, GPIO_PIN_RESET);
-		        HAL_GPIO_WritePin(SMOTOR3_PORT, SMOTOR_INI3_PIN, GPIO_PIN_RESET);
-		        HAL_GPIO_WritePin(SMOTOR124_PORT, SMOTOR_INI4_PIN, GPIO_PIN_SET);
-		      break;
-			    }
-			stepNumber--;
-		HAL_Delay(5);
-		}
-	}
-}
-
-
-void calibrateDistance(){
-
-	uint8_t oneStep = 12;
-	uint8_t numberOfMeasurements = 60;
-
-	startDistanceMeasurement();
-	HAL_Delay(5);		// delay and second measurement to make sure that first measured value isn't trash
-	startDistanceMeasurement();
-	calculateDistance();
-	mappedSourrounding[0] = distance_L;
-
-	for(uint8_t i = 0; i < numberOfMeasurements; ){
-
-		controlSMotor(oneStep, 0);
-
-		startDistanceMeasurement();
-		calculateDistance();
-		i++;
-
-		mappedSourrounding[i] = distance_L;
-	}
-
-	controlSMotor(720, 1); // Return to the max left side of sensor sight
-
-	//sprintf((char*)message, "L: %lu\n", distance_L);
-	uint32_t message[16];
-	sprintf((char*)message, "Calibration Completed.\n");
-	HAL_UART_Transmit(&huart2, message, strlen((char*)message), 1000);
-
-}
-
-
-void lookForTarget(){
-	uint8_t oneStep = 12;
-	uint8_t numberOfMeasurements = 60;
-	uint8_t measurementsTaken = 0;
-
-	uint8_t logger = 0;
-
-	for(uint8_t i = 0; i<4; i++ ){ // Repeat full scanning 4 times
-
-		for(; measurementsTaken < numberOfMeasurements; ){
-			uint32_t message[16];
-				//sprintf((char*)message, "STRZELAĆ!!!");
-
-
-				startDistanceMeasurement();
-				calculateDistance();
-
-				uint32_t supposedValue = mappedSourrounding[measurementsTaken];
-
-				controlSMotor(oneStep, 0);
-				measurementsTaken++;
-
-				logger = 0;
-
-				while(distance_L + 1000 < supposedValue){
-
-					// Save to logs that shooting happened
-					if(logger == 0){
-						HAL_RTC_GetTime(&hrtc, &sTime, RTC_FORMAT_BIN);
-						  HAL_RTC_GetDate(&hrtc, &sDate, RTC_FORMAT_BIN);
-
-						  sprintf(RW_Buffer, "SHOOT: %02d-%02d-20%02d %02d:%02d:%02d\r\n",
-						          sDate.Date,
-						          sDate.Month,
-						          sDate.Year,
-						          sTime.Hours,
-						          sTime.Minutes,
-						          sTime.Seconds);
-
-						  FR_Status = f_mount(&FatFs, "", 1);
-						      if (FR_Status != FR_OK)
-						      {
-						        sprintf(TxBuffer, "\r\nError! While Mounting SD Card, Error Code: (%i)\r\n", FR_Status);
-						        UART_Print(TxBuffer);
-						      }
-
-
-						      FR_Status = f_open(&Fil, "TextFileWrite.txt", FA_WRITE | FA_READ);
-						  if (FR_Status != FR_OK)
-						  {
-						    sprintf(TxBuffer, "\r\nError! While Opening File: (%i)\r\n", FR_Status);
-						    UART_Print(TxBuffer);
-						  }
-
-
-						  f_lseek(&Fil, f_size(&Fil));
-						  f_puts(RW_Buffer, &Fil);
-						  f_close(&Fil);
-						  //f_write(&Fil, RW_Buffer, strlen(RW_Buffer), &WWC);
-						 f_mount(NULL, "", 0);
-
-						 logger = 1;
-					}
-
-					HAL_GPIO_TogglePin(PUMP_PORT, PUMP_PIN);
-
-					//HAL_UART_Transmit(&huart1, message, strlen((char*)message), 1000);
-					HAL_Delay(50);
-
-					HAL_GPIO_TogglePin(PUMP_PORT, PUMP_PIN);
-
-					uint32_t lastDistance = distance_L;
-
-					startDistanceMeasurement();
-					calculateDistance();
-
-					if(lastDistance - 70 > distance_L){
-
-						lastDistance = distance_L;
-
-						controlSMotor(oneStep, 0);
-						HAL_GPIO_TogglePin(PUMP_PORT, PUMP_PIN);
-
-						//HAL_UART_Transmit(&huart1, message, strlen((char*)message), 1000);
-						HAL_Delay(50);
-						HAL_GPIO_TogglePin(PUMP_PORT, PUMP_PIN);
-
-						startDistanceMeasurement();
-						calculateDistance();
-
-						measurementsTaken++;
-
-					} else if(lastDistance < distance_L - 70){
-
-						lastDistance = distance_L;
-
-						controlSMotor(oneStep, 1);
-						HAL_GPIO_TogglePin(PUMP_PORT, PUMP_PIN);
-
-						//HAL_UART_Transmit(&huart1, message, strlen((char*)message), 1000);
-						HAL_Delay(50);
-						HAL_GPIO_TogglePin(PUMP_PORT, PUMP_PIN);
-
-						startDistanceMeasurement();
-						calculateDistance();
-
-						measurementsTaken--;
-					} else{
-						// ERROR???
-					}
-				}
-
-
-
-			}
-
-		if(measurementsTaken == 60){ // If sensor reached max right side turn direction
-
-			for(; measurementsTaken > 0; ){
-				uint32_t message[16];
-					//sprintf((char*)message, "STRZELAĆ!!!");
-
-
-				startDistanceMeasurement();
-				calculateDistance();
-
-				uint32_t supposedValue = mappedSourrounding[measurementsTaken];
-
-				controlSMotor(oneStep, 1);
-				measurementsTaken--;
-
-				logger = 0;
-
-				while(distance_L + 1000 < supposedValue){
-
-					// Save to logs that shooting happened
-					if(logger == 0){
-						HAL_RTC_GetTime(&hrtc, &sTime, RTC_FORMAT_BIN);
-						  HAL_RTC_GetDate(&hrtc, &sDate, RTC_FORMAT_BIN);
-
-						  sprintf(RW_Buffer, "SHOOT: %02d-%02d-20%02d %02d:%02d:%02d\r\n",
-						          sDate.Date,
-						          sDate.Month,
-						          sDate.Year,
-						          sTime.Hours,
-						          sTime.Minutes,
-						          sTime.Seconds);
-
-						  FR_Status = f_mount(&FatFs, "", 1);
-						      if (FR_Status != FR_OK)
-						      {
-						        sprintf(TxBuffer, "\r\nError! While Mounting SD Card, Error Code: (%i)\r\n", FR_Status);
-						        UART_Print(TxBuffer);
-						      }
-
-
-						      FR_Status = f_open(&Fil, "TextFileWrite.txt", FA_WRITE | FA_READ);
-						  if (FR_Status != FR_OK)
-						  {
-						    sprintf(TxBuffer, "\r\nError! While Opening File: (%i)\r\n", FR_Status);
-						    UART_Print(TxBuffer);
-						  }
-
-
-						  f_lseek(&Fil, f_size(&Fil));
-						  f_puts(RW_Buffer, &Fil);
-						  f_close(&Fil);
-						  //f_write(&Fil, RW_Buffer, strlen(RW_Buffer), &WWC);
-						 f_mount(NULL, "", 0);
-
-						 logger = 1;
-					}
-
-					HAL_GPIO_TogglePin(PUMP_PORT, PUMP_PIN);
-
-					//HAL_UART_Transmit(&huart1, message, strlen((char*)message), 1000);
-					HAL_Delay(50);
-					HAL_GPIO_TogglePin(PUMP_PORT, PUMP_PIN);
-
-					uint32_t lastDistance = distance_L;
-
-					startDistanceMeasurement();
-					calculateDistance();
-
-
-					if(lastDistance - 70 > distance_L){
-
-						lastDistance = distance_L;
-
-						controlSMotor(oneStep, 1);
-						HAL_GPIO_TogglePin(PUMP_PORT, PUMP_PIN);
-
-						//HAL_UART_Transmit(&huart1, message, strlen((char*)message), 1000);
-						HAL_Delay(50);
-						HAL_GPIO_TogglePin(PUMP_PORT, PUMP_PIN);
-
-						startDistanceMeasurement();
-						calculateDistance();
-
-						measurementsTaken--;
-
-					} else if(lastDistance < distance_L - 70){
-
-						lastDistance = distance_L;
-
-						controlSMotor(oneStep, 0);
-						HAL_GPIO_TogglePin(PUMP_PORT, PUMP_PIN);
-
-						//HAL_UART_Transmit(&huart1, message, strlen((char*)message), 1000);
-						HAL_Delay(50);
-						HAL_GPIO_TogglePin(PUMP_PORT, PUMP_PIN);
-
-
-						startDistanceMeasurement();
-						calculateDistance();
-
-						measurementsTaken++;
-					} else{
-						// ERROR???
-					}
-				}
-
-
-
-			}
-		}
-
-		if(measurementsTaken > 60){
-			measurementsTaken = 0;	// If some error appears and the function is stuck, zero the counter
-		}
-
-	}
-}
 /* USER CODE END 4 */
 
 /**
