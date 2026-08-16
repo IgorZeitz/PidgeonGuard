@@ -1,0 +1,17 @@
+../Core/Src/main.c:126:5:main	3
+../Core/Src/main.c:236:6:SystemClock_Config	3
+../Core/Src/main.c:278:13:MX_RTC_Init	2
+../Core/Src/main.c:315:13:MX_SPI1_Init	2
+../Core/Src/main.c:355:13:MX_USART2_UART_Init	2
+../Core/Src/main.c:391:13:MX_GPIO_Init	1
+../Core/Src/main.c:423:6:peripheralsOn	1
+../Core/Src/main.c:430:6:peripheralsOff	1
+../Core/Src/main.c:437:6:sprayWater	1
+../Core/Src/main.c:443:6:startDistanceMeasurement	1
+../Core/Src/main.c:449:6:calculateDistance	2
+../Core/Src/main.c:464:6:controlSMotor	18
+../Core/Src/main.c:531:6:calibrateDistance	2
+../Core/Src/main.c:569:6:lookForTarget	14
+../Core/Src/main.c:704:6:logToSD	4
+../Core/Src/main.c:796:7:printFatFsError2	10
+../Core/Src/main.c:853:6:Error_Handler	1
